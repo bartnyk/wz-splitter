@@ -64,42 +64,24 @@ class PdfFileProcessor:
         if not self._images:
             raise ValueError("PDF seems to be empty or broken.")
 
-        pattern = r"((?:WZK?|WZ)[\w-]*\/[\w-]*\/[\w-]+\/[\w-]*)"
-        # pattern =  r"(WZK|WZ-\d+/\d{2}/[A-Z0-9]+/\d{2})"
+        pattern = r"(WZK?-\d+\/\d{2}\/[A-Z]+\/\d{2})"
         wz_number: Optional[str] = None
-        i = 0
         for image in self._images:
-            i += 1
             img_cv = np.array(image)
             h, w = img_cv.shape[:2]
-            cut_img = img_cv[:h // 4, w // 2:]
+            cut_img = img_cv[: h // 4, w // 2 :]
 
-            # 2️⃣ Zwiększenie kontrastu i jasności
-            alpha, beta = 2.0, 50  # alpha - kontrast, beta - jasność
-            contrast = cv2.convertScaleAbs(cut_img, alpha=alpha, beta=beta)
-
-            # 3️⃣ Binaryzacja (progowanie)
-            _, binary = cv2.threshold(contrast, 150, 255, cv2.THRESH_BINARY)
-
-            # 4️⃣ Usunięcie szumów (morfologia - otwarcie)
-            kernel = np.ones((1, 1), np.uint8)
-            denoised = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
-
-            # 5️⃣ Wyostrzenie konturów
-            sharpen_kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
-            sharpened = cv2.filter2D(denoised, -1, sharpen_kernel)
-            blurred = cv2.GaussianBlur(sharpened, (5, 5), 0)
             # debug_dir = os.path.join(os.path.dirname(self.original_path), "debug_cuts")
             # os.makedirs(debug_dir, exist_ok=True)
-            # page_idx = self._images.index(image)
-            # cv2.imwrite(os.path.join(debug_dir, f"page_{page_idx:03d}.png"), cut_img)
+            page_idx = self._images.index(image)
+
+            matched = self._ocr_best_match(cut_img, pattern, page_idx, debug_dir)
+            if matched:
+                wz_number = self._clean_wz_number(matched)
+
             content = pytesseract.image_to_string(
-                blurred, lang="eng", config="--psm 6 --oem 3"
+                cut_img, lang="eng", config="--psm 6 --oem 3"
             )
-
-            if wz_match := re.search(pattern, content):
-                wz_number = self._clean_wz_number(wz_match.group(1))
-
             if len(content) < 40:  # pusta strona
                 continue
 
@@ -109,6 +91,53 @@ class PdfFileProcessor:
                 self._wz_map[wz_number].append(image)
 
         self._processed = True
+
+    def _ocr_best_match(
+        self, img: np.ndarray, pattern: str, page_idx: int, debug_dir: str
+    ) -> Optional[str]:
+        def _variant_original(i: np.ndarray) -> np.ndarray:
+            return i
+
+        def _variant_contrast(i: np.ndarray) -> np.ndarray:
+            return cv2.convertScaleAbs(i, alpha=2.0, beta=50)
+
+        def _variant_binary(i: np.ndarray) -> np.ndarray:
+            contrast = cv2.convertScaleAbs(i, alpha=2.0, beta=50)
+            _, binary = cv2.threshold(contrast, 150, 255, cv2.THRESH_BINARY)
+            return binary
+
+        def _variant_sharpened(i: np.ndarray) -> np.ndarray:
+            contrast = cv2.convertScaleAbs(i, alpha=2.0, beta=50)
+            _, binary = cv2.threshold(contrast, 150, 255, cv2.THRESH_BINARY)
+            kernel = np.ones((1, 1), np.uint8)
+            denoised = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
+            sharpen_kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
+            sharpened = cv2.filter2D(denoised, -1, sharpen_kernel)
+            return cv2.GaussianBlur(sharpened, (5, 5), 0)
+
+        def _variant_inverted(i: np.ndarray) -> np.ndarray:
+            return cv2.bitwise_not(_variant_binary(i))
+
+        variants = [
+            _variant_original,
+            _variant_contrast,
+            _variant_binary,
+            _variant_sharpened,
+            _variant_inverted,
+        ]
+
+        for idx, fn in enumerate(variants):
+            processed = fn(img)
+            # cv2.imwrite(
+            #     os.path.join(debug_dir, f"page_{page_idx:03d}_v{idx}.png"), processed
+            # )
+            content = pytesseract.image_to_string(
+                processed, lang="eng", config="--psm 6 --oem 3"
+            )
+            if m := re.search(pattern, content):
+                return m.group(1)
+
+        return None
 
     def _clean_wz_number(self, wz: str) -> str:
         """
@@ -146,7 +175,7 @@ class PdfFileProcessor:
             print(f"  [{counter:02d}] {file_name}  ({len(images)} page[s])")
 
         print(f"\nTotal: {counter} WZ's from {source_name}.")
-        
+
         self._move_done()
 
     def _move_done(self) -> None:
