@@ -20,6 +20,10 @@ if tesseract_path:
 DEBUG = os.getenv("WZ_DEBUG", "false").lower() == "true"
 
 
+class BlankPage(Exception):
+    pass
+
+
 class PdfFileProcessor:
     def __init__(
         self,
@@ -80,16 +84,13 @@ class PdfFileProcessor:
                     os.path.dirname(self.original_path), "debug_cuts"
                 )
                 os.makedirs(debug_dir, exist_ok=True)
+            try:
+                matched = self._ocr_best_match(cut_img, pattern, page_idx, debug_dir)
+            except BlankPage:
+                continue
 
-            matched = self._ocr_best_match(cut_img, pattern, page_idx, debug_dir)
             if matched:
                 wz_number = self._clean_wz_number(matched)
-
-            content = pytesseract.image_to_string(
-                cut_img, lang="eng", config="--psm 6 --oem 3"
-            )
-            if len(content) < 40:  # pusta strona
-                continue
 
             if wz_number:
                 if wz_number not in self._wz_map:
@@ -142,6 +143,9 @@ class PdfFileProcessor:
             content = pytesseract.image_to_string(
                 processed, lang="eng", config="--psm 6 --oem 3"
             )
+            if idx == 0 and len(content) < 40:  # pusta strona
+                # breakpoint()
+                raise BlankPage()
             if m := re.search(pattern, content):
                 return m.group(1)
 
