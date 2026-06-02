@@ -23,18 +23,26 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
+      - name: Set EXE name
+        run: |
+          if ("${{ github.event_name }}" -eq "release") {
+            echo "EXE_NAME=WZSplitter-${{ github.ref_name }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } else {
+            echo "EXE_NAME=WZSplitter" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
       - name: Build EXE with PyInstaller
         run: |
-          pyinstaller --onefile --clean --name WZSplitter main.py
+          pyinstaller --onefile --clean --name "${{ env.EXE_NAME }}" main.py
 
       - name: Upload EXE as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WZSplitter
-          path: dist/WZSplitter.exe
+          name: ${{ env.EXE_NAME }}
+          path: dist/${{ env.EXE_NAME }}.exe
 
       - name: Upload EXE to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/WZSplitter.exe
+          files: dist/${{ env.EXE_NAME }}.exe
