@@ -17,6 +17,8 @@ tesseract_path = os.getenv("WZ_TESSERACT_PATH")
 if tesseract_path:
     pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
+DEBUG = os.getenv("WZ_DEBUG", "false").lower() == "true"
+
 
 class PdfFileProcessor:
     def __init__(
@@ -71,9 +73,13 @@ class PdfFileProcessor:
             h, w = img_cv.shape[:2]
             cut_img = img_cv[: h // 4, w // 2 :]
 
-            # debug_dir = os.path.join(os.path.dirname(self.original_path), "debug_cuts")
-            # os.makedirs(debug_dir, exist_ok=True)
             page_idx = self._images.index(image)
+            debug_dir = None
+            if DEBUG:
+                debug_dir = os.path.join(
+                    os.path.dirname(self.original_path), "debug_cuts"
+                )
+                os.makedirs(debug_dir, exist_ok=True)
 
             matched = self._ocr_best_match(cut_img, pattern, page_idx, debug_dir)
             if matched:
@@ -128,9 +134,11 @@ class PdfFileProcessor:
 
         for idx, fn in enumerate(variants):
             processed = fn(img)
-            # cv2.imwrite(
-            #     os.path.join(debug_dir, f"page_{page_idx:03d}_v{idx}.png"), processed
-            # )
+            if debug_dir:
+                cv2.imwrite(
+                    os.path.join(debug_dir, f"page_{page_idx:03d}_v{idx}.png"),
+                    processed,
+                )
             content = pytesseract.image_to_string(
                 processed, lang="eng", config="--psm 6 --oem 3"
             )
