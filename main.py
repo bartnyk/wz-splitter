@@ -46,8 +46,13 @@ class PDFProcessor:
         try:
             # Atomic claim: move file to processing directory
             os.rename(file_path, claimed_path)
-        except (OSError, FileNotFoundError):
-            # File likely already claimed by another instance or moved
+        except PermissionError as e:
+            print(
+                f"Skipping {file_name}: file is locked by another process. Close it and try again. {e}"
+            )
+            return
+        except (OSError, FileNotFoundError) as e:
+            print(f"Skipping {file_name}: {e}")
             return
 
         print(f"Processing: {file_name}")
